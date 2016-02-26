@@ -36,7 +36,21 @@ def get_elements(dtd_file):
     return elements
 
 
-def parse_xml(xml_file, elements, output_file):
+def open_outputfiles(elements, element_attributes, output_filename):
+    (path, ext) = os.path.splitext(output_filename)
+    output_files = dict()
+    for element in elements:
+        outputpath = "%s_%s%s" % (path, element, ext)
+        outputfile = open(outputpath, "w")
+        fieldnames = list(element_attributes[element])
+        output_writer = csv.DictWriter(outputfile, fieldnames=fieldnames, delimiter=';', quoting=csv.QUOTE_NONNUMERIC,
+                                       restval='')
+        output_writer.writeheader()
+        output_files[element] = output_writer
+    return output_files
+
+
+def get_element_attributes(xml_file, elements):
     context = etree.iterparse(xml_file, dtd_validation=True, events=("start", "end"))
 
     # turn it into an iterator
@@ -44,35 +58,53 @@ def parse_xml(xml_file, elements, output_file):
 
     # get the root element
     event, root = next(context)
-    print(root)
 
-    attributes = set()
-    fieldnames = ['title', 'ee', 'series', 'year', 'volume', 'sub', 'author', 'cdrom', 'month', 'cite', 'isbn',
-                  'school', 'url', 'chapter', 'sup', 'publisher', 'pages', 'editor', 'crossref', 'number', 'journal',
-                  'note', 'booktitle', 'address', 'tt', 'i']
-
-    output_writer = csv.DictWriter(output_file, fieldnames=fieldnames, delimiter=';', quoting=csv.QUOTE_NONNUMERIC,
-                                   restval='', extrasaction='ignore')
-    output_writer.writeheader()
     data = dict()
     current_tag = None
-    arrays = []
+    for event, elem in context:
+        if current_tag is None and event == "start" and elem.tag in elements:
+            current_tag = elem.tag
+            keys = elem.keys()
+            if len(keys) > 0:
+                attributes = data.get(current_tag, set())
+                data[current_tag] = attributes.union(set(keys))
+        elif current_tag is not None and event == "end":
+            if elem.tag == current_tag:
+                current_tag = None
+            elif elem.tag is not None and elem.text is not None:
+                attributes = data.get(current_tag, set())
+                attributes.add(elem.tag)
+                keys = elem.keys()
+                if len(keys) > 0:
+                    for key in keys:
+                        attributes.add("%s-%s" % (elem.tag, key))
+                data[current_tag] = attributes
+            root.clear()
+    return data
+
+
+def parse_xml(xml_file, elements, output_files):
+    context = etree.iterparse(xml_file, dtd_validation=True, events=("start", "end"))
+    # turn it into an iterator
+    context = iter(context)
+    # get the root element
+    event, root = next(context)
+    data = dict()
+    current_tag = None
+    multiple_valued_cells = []
     for event, elem in context:
         if current_tag is None and event == "start" and elem.tag in elements:
             current_tag = elem.tag
             data.clear()
-            arrays.clear()
-            data['element'] = current_tag
-        if current_tag is not None and event == "end":
+            multiple_valued_cells.clear()
+            data.update(elem.attrib)
+        elif current_tag is not None and event == "end":
             if elem.tag == current_tag:
-                for a in arrays:
-                    data[a] = ' | '.join(data[a])
-                #print(data)
-                #print('\n')
+                for cell in multiple_valued_cells:
+                    data[cell] = ' | '.join(data[cell])
+                output_files[current_tag].writerow(data)
                 current_tag = None
-                output_writer.writerow(data)
             elif elem.tag is not None and elem.text is not None:
-                attributes.add(elem.tag)
                 entry = data.get(elem.tag, None)
                 if entry is None:
                     data[elem.tag] = elem.text
@@ -82,24 +114,33 @@ def parse_xml(xml_file, elements, output_file):
                         data[elem.tag] = entry
                     else:
                         data[elem.tag] = [entry, elem.text]
-                        arrays.append(elem.tag)
+                        multiple_valued_cells.append(elem.tag)
+                # TODO: Probably want to check for multi-valued cells as well here.
+                for (key, value) in elem.attrib.items():
+                    data["%s-%s" % (elem.tag, key)] = value
             root.clear()
-    print(attributes)
 
 
 def main():
     args = parse_args()
     if args.xml_filename is not None and args.dtd_filename is not None and args.outputfile is not None:
         start_time = time.time()
-        dtd_file = open(args.dtd_filename, "rb")
-        elements = get_elements(dtd_file)
-        xml_file = open(args.xml_filename, "rb")
-        outputfile = open(args.outputfile, "w")
-        parse_xml(xml_file, elements, outputfile)
+        print("Start!")
+        with open(args.dtd_filename, "rb") as dtd_file:
+            print("Reading elements from DTD file...")
+            elements = get_elements(dtd_file)
+        with open(args.xml_filename, "rb") as xml_file:
+            print("Finding unique attributes for all elements...")
+            element_attributes = get_element_attributes(xml_file, elements)
+        print("Opening output files...")
+        output_files = open_outputfiles(elements, element_attributes, args.outputfile)
+        with open(args.xml_filename, "rb") as xml_file:
+            print("Parsing XML and writing to CSV files...")
+            parse_xml(xml_file, elements, output_files)
         end_time = time.time()
         print("Done after %f seconds" % (end_time - start_time))
     else:
-        print("Give a valid filename.")
+        print("Invalid input arguments.")
         exit(1)
 
 
