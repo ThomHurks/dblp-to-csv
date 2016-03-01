@@ -42,7 +42,7 @@ def open_outputfiles(elements, element_attributes, output_filename):
     for element in elements:
         outputpath = "%s_%s%s" % (path, element, ext)
         outputfile = open(outputpath, "w")
-        fieldnames = list(element_attributes[element])
+        fieldnames = sorted(list(element_attributes[element]))
         output_writer = csv.DictWriter(outputfile, fieldnames=fieldnames, delimiter=';', quoting=csv.QUOTE_NONNUMERIC,
                                        restval='')
         output_writer.writeheader()
@@ -52,13 +52,10 @@ def open_outputfiles(elements, element_attributes, output_filename):
 
 def get_element_attributes(xml_file, elements):
     context = etree.iterparse(xml_file, dtd_validation=True, events=("start", "end"))
-
     # turn it into an iterator
     context = iter(context)
-
     # get the root element
     event, root = next(context)
-
     data = dict()
     current_tag = None
     for event, elem in context:
@@ -91,7 +88,7 @@ def parse_xml(xml_file, elements, output_files):
     event, root = next(context)
     data = dict()
     current_tag = None
-    multiple_valued_cells = []
+    multiple_valued_cells = set()
     for event, elem in context:
         if current_tag is None and event == "start" and elem.tag in elements:
             current_tag = elem.tag
@@ -101,24 +98,27 @@ def parse_xml(xml_file, elements, output_files):
         elif current_tag is not None and event == "end":
             if elem.tag == current_tag:
                 for cell in multiple_valued_cells:
-                    data[cell] = ' | '.join(data[cell])
+                    data[cell] = ' | '.join(sorted(data[cell]))
                 output_files[current_tag].writerow(data)
                 current_tag = None
             elif elem.tag is not None and elem.text is not None:
-                entry = data.get(elem.tag, None)
-                if entry is None:
-                    data[elem.tag] = elem.text
-                else:
-                    if isinstance(entry, list):
-                        entry.append(elem.text)
-                        data[elem.tag] = entry
-                    else:
-                        data[elem.tag] = [entry, elem.text]
-                        multiple_valued_cells.append(elem.tag)
-                # TODO: Probably want to check for multi-valued cells as well here.
+                set_cell_value(data, elem.tag, elem.text, multiple_valued_cells)
                 for (key, value) in elem.attrib.items():
-                    data["%s-%s" % (elem.tag, key)] = value
+                    set_cell_value(data, "%s-%s" % (elem.tag, key), value, multiple_valued_cells)
             root.clear()
+
+
+def set_cell_value(data, column_name, value, multiple_valued_cells):
+    entry = data.get(column_name, None)
+    if entry is None:
+        data[column_name] = value
+    else:
+        if isinstance(entry, list):
+            entry.append(value)
+            data[column_name] = entry
+        else:
+            data[column_name] = [entry, value]
+            multiple_valued_cells.add(column_name)
 
 
 def main():
