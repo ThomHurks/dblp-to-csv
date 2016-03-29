@@ -183,8 +183,7 @@ def get_type(string_value: str) -> type:
             return int
         except ValueError:
             return str
-    splits = string_value.split(sep='.')
-    if len(splits) == 2 and str.isdigit(splits[0]) and str.isdigit(splits[1]):
+    if get_type.re_number.fullmatch(string_value) is not None:
         try:
             float(string_value)
             return float
@@ -193,6 +192,7 @@ def get_type(string_value: str) -> type:
     if string_value.lower() == "true" or string_value.lower() == "false":
         return bool
     return str
+get_type.re_number = re.compile("^\d+\.\d+$")
 
 
 def write_annotated_header(array_elements: dict, element_types: dict, output_filename: str):
