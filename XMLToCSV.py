@@ -30,6 +30,13 @@ def existing_file(filename: str) -> str:
         raise argparse.ArgumentTypeError("%s is not a valid input file!" % filename)
 
 
+def existing_dir(dirname: str) -> str:
+    if os.path.isdir(dirname):
+        return dirname
+    else:
+        raise argparse.ArgumentTypeError("%s is not a valid directory!" % dirname)
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description='Parse the DBLP XML file and convert it to CSV')
     parser.add_argument('xml_filename', action='store', type=existing_file, help='The XML file that will be parsed',
@@ -39,7 +46,20 @@ def parse_args():
     parser.add_argument('outputfile', action='store', type=str, help='The output CSV file', metavar='outputfile')
     parser.add_argument('--annotate', action='store_true', required=False,
                         help='Write a separate annotated header with type information')
-    return parser.parse_args()
+    parser.add_argument('--neo4j', action='store_true', required=False,
+                        help='Headers become more Neo4J-specific and a neo4j-import shell script is generated for easy '
+                             'importing. Implies --annotate.')
+    parser.add_argument('--neo4j_dir', action='store', required=False, type=existing_dir,
+                        help='Target neo4j DB directory for the generated neo4j-import shell script command.')
+    parsed_args = parser.parse_args()
+    if parsed_args.neo4j:
+        if not parsed_args.annotate:
+            parsed_args.annotate = True
+            print("--neo4j implies --annotate!")
+        if not parsed_args.neo4j_dir:
+            print("--neo4j_dir is a required argument when --neo4j is used!")
+            exit(1)
+    return parsed_args
 
 
 def get_elements(dtd_file) -> set:
@@ -52,7 +72,7 @@ def get_elements(dtd_file) -> set:
     return elements
 
 
-def open_outputfiles(elements: set, element_attributes: dict, output_filename: str) -> dict:
+def open_outputfiles(elements: set, element_attributes: dict, output_filename: str, annotated: bool = False) -> dict:
     (path, ext) = os.path.splitext(output_filename)
     output_files = dict()
     for element in elements:
@@ -63,14 +83,16 @@ def open_outputfiles(elements: set, element_attributes: dict, output_filename: s
             output_path = "%s_%s%s" % (path, element, ext)
             output_file = open(output_path, "w")
             output_writer = csv.DictWriter(output_file, fieldnames=fieldnames, delimiter=';',
-                                           quoting=csv.QUOTE_NONNUMERIC, restval='')
-            output_writer.writeheader()
+                                           quoting=csv.QUOTE_NONNUMERIC, restval='', doublequote=False, escapechar='\\')
+            if not annotated:
+                output_writer.writeheader()
             output_files[element] = output_writer
     return output_files
 
 
 def get_element_attributes(xml_file, elements: set) -> dict:
-    context = etree.iterparse(xml_file, dtd_validation=True, events=("start", "end"))
+    context = etree.iterparse(xml_file, dtd_validation=True, events=("start", "end"), attribute_defaults=True,
+                              load_dtd=True)
     # turn it into an iterator
     context = iter(context)
     # get the root element
@@ -138,6 +160,7 @@ def parse_xml(xml_file, elements: set, output_files: Dict[str, csv.DictWriter], 
                 if len(data) > 0:
                     row_id = unique_ids[current_tag] = unique_ids[current_tag] + 1
                     data["id"] = row_id
+                    fix_characters(data)
                     output_files[current_tag].writerow(data)
                 current_tag = None
             elif elem.tag is not None and elem.text is not None:
@@ -175,6 +198,25 @@ def set_type_information(element_types: dict, current_tag: str, column_name: str
     element_types[current_tag] = attribute_types
 
 
+def fix_characters(data):
+    """ Sadly some bibtex in the input is causing issues with CSV writing and subsequent parsing. The solution is to
+     delete the escaping slashes of already-escaped quotes, such that the quote is not doubly-escaped later."""
+    for key, value in data.items():
+        if isinstance(value, str):
+            fixed_value = value.replace("\\\"", "\"")
+            if fixed_value != value:
+                print("Replaced '%s' by '%s'" % (value, fixed_value))
+                data[key] = fixed_value
+        elif isinstance(value, list):
+            for i, listvalue in enumerate(value):
+                if isinstance(listvalue, str):
+                    fixed_value = listvalue.replace("\\\"", "\"")
+                    if fixed_value != listvalue:
+                        print("Replaced '%s' by '%s'" % (listvalue, fixed_value))
+                        value[i] = fixed_value
+            data[key] = value
+
+
 def get_type(string_value: str) -> type:
     """Attempt to handle types int, float, boolean and string, nothing more complex since output is CSV."""
     if str.isdigit(string_value):
@@ -195,35 +237,41 @@ def get_type(string_value: str) -> type:
 get_type.re_number = re.compile("^\d+\.\d+$")
 
 
-def write_annotated_header(array_elements: dict, element_types: dict, output_filename: str):
+def write_annotated_header(array_elements: dict, element_types: dict, output_filename: str, neo4j_style: bool = False):
     (path, ext) = os.path.splitext(output_filename)
     for element, column_types in element_types.items():
         output_path = "%s_%s_header%s" % (path, element, ext)
         header = []
         array_columns = array_elements[element]
         columns = sorted(list(column_types.keys()))
-        columns.insert(0, "id")
-        column_types["id"] = {type(0)}
+        if neo4j_style:
+            header.append(":ID(%s)" % element)
+        else:
+            columns.insert(0, "id")
+            column_types["id"] = set(int)
         for column in columns:
             types = column_types[column]
             high_level_type = get_high_level_type(types)
-            typename = type_to_string(high_level_type)
+            typename = type_to_string(high_level_type, neo4j_style)
             if column in array_columns:
                 header.append("%s:%s[]" % (column, typename))
             else:
                 header.append("%s:%s" % (column, typename))
         with open(output_path, "w") as output_file:
-            output_file.write(','.join(header))
+            output_file.write(';'.join(header))
 
 
-def type_to_string(type_input: type) -> str:
+def type_to_string(type_input: type, neo4j_style: bool = False) -> str:
     typematch = type_to_string.re_typename.fullmatch(str(type_input))
     if typematch is not None:
         typename = typematch.group(1)
         if typename == 'str':
             return "string"
         elif typename == 'int':
-            return "integer"
+            if neo4j_style:
+                return "int"
+            else:
+                return "integer"
         elif typename == 'bool':
             return "boolean"
         else:
@@ -248,6 +296,15 @@ def get_high_level_type(types: set):
             return str
 
 
+def generate_neo4j_import_command(target_dir, elements: set, output_filename: str):
+    (path, ext) = os.path.splitext(output_filename)
+    command = "neo4j-import --into %s --delimiter \";\" --array-delimiter \"|\" --ignore-empty-strings true " \
+              "--id-type INTEGER" % target_dir
+    for element in elements:
+        command += " --nodes:%s \"%s_%s_header%s,%s_%s%s\"" % (element, path, element, ext, path, element, ext)
+    return command
+
+
 def main():
     args = parse_args()
     if args.xml_filename is not None and args.dtd_filename is not None and args.outputfile is not None:
@@ -265,15 +322,25 @@ def main():
                 print(e)
                 exit(1)
         print("Opening output files...")
-        output_files = open_outputfiles(elements, element_attributes, args.outputfile)
+        output_files = open_outputfiles(elements, element_attributes, args.outputfile, args.annotate)
+        array_elements = False
+        element_types = False
         with open(args.xml_filename, "rb") as xml_file:
             print("Parsing XML and writing to CSV files...")
             if args.annotate:
                 (array_elements, element_types) = parse_xml(xml_file, elements, output_files, annotate=True)
-                print("Writing annotated headers...")
-                write_annotated_header(array_elements, element_types, args.outputfile)
             else:
                 parse_xml(xml_file, elements, output_files)
+        if args.annotate and array_elements and element_types:
+            print("Writing annotated headers...")
+            write_annotated_header(array_elements, element_types, args.outputfile, args.neo4j)
+            if args.neo4j:
+                print("Generating neo4j-import command...")
+                command = generate_neo4j_import_command(args.neo4j_dir, set(element_types.keys()), args.outputfile)
+                print("Writing neo4j-import command to shell script file...")
+                with open("neo4j_import.sh", "w") as command_file:
+                    command_file.write("#!/bin/bash\n")
+                    command_file.write(command)
         end_time = time.time()
         print("Done after %f seconds" % (end_time - start_time))
     else:
