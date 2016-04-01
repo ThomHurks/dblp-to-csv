@@ -98,6 +98,8 @@ def get_element_attributes(xml_file, elements: set) -> dict:
     # get the root element
     event, root = next(context)
     data = dict()
+    for element in elements:
+        data[element] = set()
     current_tag = None
     for event, elem in context:
         if current_tag is None and event == "start" and elem.tag in elements:
@@ -107,7 +109,7 @@ def get_element_attributes(xml_file, elements: set) -> dict:
                 keys = set(keys)
                 if "id" in keys:
                     raise InvalidElementName("id", elem.tag, "root")
-                attributes = data.get(current_tag, set())
+                attributes = data.get[current_tag]
                 data[current_tag] = attributes.union(keys)
         elif current_tag is not None and event == "end":
             if elem.tag == current_tag:
@@ -115,14 +117,16 @@ def get_element_attributes(xml_file, elements: set) -> dict:
             elif elem.tag is not None and elem.text is not None:
                 if elem.tag == "id":
                     raise InvalidElementName("id", elem.tag, current_tag)
-                attributes = data.get(current_tag, set())
+                attributes = data.get[current_tag]
                 attributes.add(elem.tag)
                 keys = elem.keys()
                 if len(keys) > 0:
                     for key in keys:
                         attributes.add("%s-%s" % (elem.tag, key))
-                data[current_tag] = attributes
             root.clear()
+    for element in elements:
+        if len(data[element]) == 0:
+            data.pop(element)
     return data
 
 
@@ -134,6 +138,7 @@ def parse_xml(xml_file, elements: set, output_files: Dict[str, csv.DictWriter], 
     # get the root element
     event, root = next(context)
     data = dict()
+    relations = dict()
     current_tag = None
     multiple_valued_cells = set()
     unique_ids = dict()
@@ -177,6 +182,13 @@ def parse_xml(xml_file, elements: set, output_files: Dict[str, csv.DictWriter], 
         return array_elements, element_types
 
 
+def set_relation_value(relations: dict, column_name: str, value: str, to_id: int):
+    relation = relations.get(column_name, dict())
+    rel_instance = relation.get(value, set())
+    rel_instance.add(to_id)
+    relation[value] = rel_instance
+
+
 def set_cell_value(data: dict, column_name: str, value: str, multiple_valued_cells: set):
     entry = data.get(column_name, None)
     if entry is None:
@@ -184,7 +196,6 @@ def set_cell_value(data: dict, column_name: str, value: str, multiple_valued_cel
     else:
         if isinstance(entry, list):
             entry.append(value)
-            data[column_name] = entry
         else:
             data[column_name] = [entry, value]
             multiple_valued_cells.add(column_name)
@@ -194,8 +205,6 @@ def set_type_information(element_types: dict, current_tag: str, column_name: str
     attribute_types = element_types.get(current_tag, dict())
     types = attribute_types.get(column_name, set())
     types.add(get_type(value))
-    attribute_types[column_name] = types
-    element_types[current_tag] = attribute_types
 
 
 def fix_characters(data):
@@ -214,7 +223,6 @@ def fix_characters(data):
                     if fixed_value != listvalue:
                         print("Replaced '%s' by '%s'" % (listvalue, fixed_value))
                         value[i] = fixed_value
-            data[key] = value
 
 
 def get_type(string_value: str) -> type:
