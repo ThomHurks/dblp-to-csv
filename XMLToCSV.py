@@ -6,7 +6,7 @@ import os
 import csv
 import time
 import re
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, Union
 
 __author__ = 'Thom Hurks'
 
@@ -51,6 +51,9 @@ def parse_args():
                              'importing. Implies --annotate.')
     parser.add_argument('--neo4j_dir', action='store', required=False, type=existing_dir,
                         help='Target neo4j DB directory for the generated neo4j-import shell script command.')
+    parser.add_argument('--relations', action='store', required=False, type=str, nargs='+',
+                        help='The element attributes that need to be turned into a relation instance to their element, '
+                             'e.g. for author to article, editor to book, etc pass in: author editor')
     parsed_args = parser.parse_args()
     if parsed_args.neo4j:
         if not parsed_args.annotate:
@@ -59,6 +62,9 @@ def parse_args():
         if not parsed_args.neo4j_dir:
             print("--neo4j_dir is a required argument when --neo4j is used!")
             exit(1)
+    if parsed_args.relations:
+        parsed_args.relations = set(parsed_args.relations)
+        print("Will create relations for attribute(s:) %s" % (", ".join(sorted(list(parsed_args.relations)))))
     return parsed_args
 
 
@@ -109,7 +115,7 @@ def get_element_attributes(xml_file, elements: set) -> dict:
                 keys = set(keys)
                 if "id" in keys:
                     raise InvalidElementName("id", elem.tag, "root")
-                attributes = data.get[current_tag]
+                attributes = data[current_tag]
                 data[current_tag] = attributes.union(keys)
         elif current_tag is not None and event == "end":
             if elem.tag == current_tag:
@@ -117,7 +123,7 @@ def get_element_attributes(xml_file, elements: set) -> dict:
             elif elem.tag is not None and elem.text is not None:
                 if elem.tag == "id":
                     raise InvalidElementName("id", elem.tag, current_tag)
-                attributes = data.get[current_tag]
+                attributes = data[current_tag]
                 attributes.add(elem.tag)
                 keys = elem.keys()
                 if len(keys) > 0:
@@ -130,8 +136,9 @@ def get_element_attributes(xml_file, elements: set) -> dict:
     return data
 
 
-def parse_xml(xml_file, elements: set, output_files: Dict[str, csv.DictWriter], annotate: bool = False) \
-        -> Optional[Tuple[dict, dict]]:
+def parse_xml(xml_file, elements: set, output_files: Dict[str, csv.DictWriter], relation_attributes: set,
+              annotate: bool = False) \
+        -> Union[Tuple[dict, int, dict, dict], Tuple[dict, int]]:
     context = etree.iterparse(xml_file, dtd_validation=True, events=("start", "end"))
     # turn it into an iterator
     context = iter(context)
@@ -141,12 +148,10 @@ def parse_xml(xml_file, elements: set, output_files: Dict[str, csv.DictWriter], 
     relations = dict()
     current_tag = None
     multiple_valued_cells = set()
-    unique_ids = dict()
+    unique_id = 0
     if annotate:
         array_elements = dict()
         element_types = dict()
-    for key in output_files.keys():
-        unique_ids[key] = -1
     for event, elem in context:
         if current_tag is None and event == "start" and elem.tag in elements:
             current_tag = elem.tag
@@ -158,15 +163,16 @@ def parse_xml(xml_file, elements: set, output_files: Dict[str, csv.DictWriter], 
                     set_type_information(element_types, current_tag, key, value)
         elif current_tag is not None and event == "end":
             if elem.tag == current_tag:
-                for cell in multiple_valued_cells:
-                    data[cell] = '|'.join(sorted(data[cell]))
-                if annotate:
-                    array_elements[current_tag] = array_elements.get(current_tag, set()).union(multiple_valued_cells)
                 if len(data) > 0:
-                    row_id = unique_ids[current_tag] = unique_ids[current_tag] + 1
-                    data["id"] = row_id
+                    set_relation_values(relations, data, relation_attributes, unique_id)
+                    for cell in multiple_valued_cells:
+                        data[cell] = '|'.join(sorted(data[cell]))
+                    data["id"] = unique_id
                     fix_characters(data)
                     output_files[current_tag].writerow(data)
+                    if annotate and len(multiple_valued_cells) > 0:
+                        array_elements[current_tag] = array_elements.get(current_tag, set()).union(multiple_valued_cells)
+                    unique_id += 1
                 current_tag = None
             elif elem.tag is not None and elem.text is not None:
                 set_cell_value(data, elem.tag, elem.text, multiple_valued_cells)
@@ -179,14 +185,25 @@ def parse_xml(xml_file, elements: set, output_files: Dict[str, csv.DictWriter], 
                         set_type_information(element_types, current_tag, column_name, value)
             root.clear()
     if annotate:
-        return array_elements, element_types
+        return relations, unique_id, array_elements, element_types
+    else:
+        return relations, unique_id
 
 
-def set_relation_value(relations: dict, column_name: str, value: str, to_id: int):
-    relation = relations.get(column_name, dict())
-    rel_instance = relation.get(value, set())
-    rel_instance.add(to_id)
-    relation[value] = rel_instance
+def set_relation_values(relations: dict, data: dict, relation_attributes: set, to_id: int):
+    for column_name, attributes in data.items():
+        if column_name in relation_attributes:
+            relation = relations.get(column_name, dict())
+            if isinstance(attributes, list):
+                for attribute in attributes:
+                    rel_instance = relation.get(attribute, set())
+                    rel_instance.add(to_id)
+                    relation[attribute] = rel_instance
+            else:
+                rel_instance = relation.get(attributes, set())
+                rel_instance.add(to_id)
+                relation[attributes] = rel_instance
+            relations[column_name] = relation
 
 
 def set_cell_value(data: dict, column_name: str, value: str, multiple_valued_cells: set):
@@ -253,7 +270,7 @@ def write_annotated_header(array_elements: dict, element_types: dict, output_fil
         array_columns = array_elements[element]
         columns = sorted(list(column_types.keys()))
         if neo4j_style:
-            header.append(":ID(%s)" % element)
+            header.append(":ID" % element)
         else:
             columns.insert(0, "id")
             column_types["id"] = set(int)
@@ -313,6 +330,25 @@ def generate_neo4j_import_command(target_dir, elements: set, output_filename: st
     return command
 
 
+def write_relation_files(output_filename: str, relations: dict, unique_id: int):
+    (path, ext) = os.path.splitext(output_filename)
+    for column_name, relation in relations.items():
+        output_path_node = "%s_%s%s" % (path, column_name, ext)
+        output_path_relation = "%s_%s_relation%s" % (path, column_name, ext)
+        with open(output_path_relation, "w") as output_file_relation:
+            output_file_relation.write(":START_ID;:END_ID\n")
+            with open(output_path_node, "w") as output_file_node:
+                node_output_writer = csv.writer(output_file_node,
+                                                delimiter=';', quoting=csv.QUOTE_NONNUMERIC,
+                                                doublequote=False, escapechar='\\')
+                output_file_node.write(":ID;%s:string\n" % column_name)
+                for value, rel_instance in relation.items():
+                    node_output_writer.writerow([unique_id, value.replace("\\\"", "\"")])
+                    for to_id in rel_instance:
+                        output_file_relation.write("%d;%d\n" % (unique_id, to_id))
+                    unique_id += 1
+
+
 def main():
     args = parse_args()
     if args.xml_filename is not None and args.dtd_filename is not None and args.outputfile is not None:
@@ -331,14 +367,18 @@ def main():
                 exit(1)
         print("Opening output files...")
         output_files = open_outputfiles(elements, element_attributes, args.outputfile, args.annotate)
-        array_elements = False
-        element_types = False
+        array_elements = None
+        element_types = None
         with open(args.xml_filename, "rb") as xml_file:
             print("Parsing XML and writing to CSV files...")
             if args.annotate:
-                (array_elements, element_types) = parse_xml(xml_file, elements, output_files, annotate=True)
+                (relations, unique_id, array_elements, element_types) = parse_xml(xml_file, elements, output_files,
+                                                                                  args.relations, annotate=True)
             else:
-                parse_xml(xml_file, elements, output_files)
+                relations, unique_id = parse_xml(xml_file, elements, output_files, args.relations)
+        if args.relations and relations and unique_id >= 0:
+            print("Writing relation files...")
+            write_relation_files(args.outputfile, relations, unique_id)
         if args.annotate and array_elements and element_types:
             print("Writing annotated headers...")
             write_annotated_header(array_elements, element_types, args.outputfile, args.neo4j)
