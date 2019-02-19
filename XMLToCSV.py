@@ -328,12 +328,11 @@ def write_relation_files(output_filename: str, relations: dict, unique_id: int):
         with open(output_path_relation, "w") as output_file_relation:
             output_file_relation.write(":START_ID;:END_ID\n")
             with open(output_path_node, "w") as output_file_node:
-                node_output_writer = csv.writer(output_file_node,
-                                                delimiter=';', quoting=csv.QUOTE_NONNUMERIC,
-                                                doublequote=False, escapechar='\\')
+                node_output_writer = csv.writer(output_file_node, delimiter=';', quoting=csv.QUOTE_MINIMAL,
+                                                quotechar='"', doublequote=True)
                 output_file_node.write(":ID;%s:string\n" % column_name)
                 for value, rel_instance in relation.items():
-                    node_output_writer.writerow([unique_id, value.replace("\\\"", "\"")])
+                    node_output_writer.writerow([unique_id, value])
                     for to_id in rel_instance:
                         output_file_relation.write("%d;%d\n" % (unique_id, to_id))
                     unique_id += 1
