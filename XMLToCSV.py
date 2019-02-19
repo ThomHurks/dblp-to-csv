@@ -6,7 +6,7 @@ import os
 import csv
 import time
 import re
-from typing import Dict, Tuple, Union
+from typing import Dict, Tuple, Union, Any
 
 __author__ = 'Thom Hurks'
 
@@ -49,8 +49,6 @@ def parse_args():
     parser.add_argument('--neo4j', action='store_true', required=False,
                         help='Headers become more Neo4J-specific and a neo4j-import shell script is generated for easy '
                              'importing. Implies --annotate.')
-    parser.add_argument('--neo4j_dir', action='store', required=False, type=existing_dir,
-                        help='Target neo4j DB directory for the generated neo4j-import shell script command.')
     parser.add_argument('--relations', action='store', required=False, type=str, nargs='+',
                         help='The element attributes that need to be turned into a relation instance to their element, '
                              'e.g. for author to article, editor to book, etc pass in: author editor')
@@ -59,9 +57,6 @@ def parse_args():
         if not parsed_args.annotate:
             parsed_args.annotate = True
             print("--neo4j implies --annotate!")
-        if not parsed_args.neo4j_dir:
-            print("--neo4j_dir is a required argument when --neo4j is used!")
-            exit(1)
     if parsed_args.relations:
         parsed_args.relations = set(parsed_args.relations)
         print("Will create relations for attribute(s:) %s" % (", ".join(sorted(list(parsed_args.relations)))))
@@ -91,7 +86,8 @@ def open_outputfiles(elements: set, element_attributes: dict, output_filename: s
             output_path = "%s_%s%s" % (path, element, ext)
             output_file = open(output_path, "w")
             output_writer = csv.DictWriter(output_file, fieldnames=fieldnames, delimiter=';',
-                                           quoting=csv.QUOTE_NONNUMERIC, restval='', doublequote=False, escapechar='\\')
+                                           quoting=csv.QUOTE_MINIMAL, quotechar='"', doublequote=True,
+                                           restval='', extrasaction='raise')
             if not annotated:
                 output_writer.writeheader()
             output_files[element] = output_writer
@@ -171,7 +167,6 @@ def parse_xml(xml_file, elements: set, output_files: Dict[str, csv.DictWriter], 
                     for cell in multiple_valued_cells:
                         data[cell] = '|'.join(sorted(data[cell]))
                     data["id"] = unique_id
-                    fix_characters(data)
                     output_files[current_tag].writerow(data)
                     if annotate and len(multiple_valued_cells) > 0:
                         element_cells = array_elements.get(current_tag)
@@ -237,26 +232,10 @@ def set_type_information(element_types: dict, current_tag: str, column_name: str
     types.add(get_type(value))
 
 
-def fix_characters(data):
-    """ Sadly some bibtex in the input is causing issues with CSV writing and subsequent parsing. The solution is to
-     delete the escaping slashes of already-escaped quotes, such that the quote is not doubly-escaped later."""
-    for key, value in data.items():
-        if isinstance(value, str):
-            fixed_value = value.replace("\\\"", "\"")
-            if fixed_value != value:
-                print("Replaced '%s' by '%s'" % (value, fixed_value))
-                data[key] = fixed_value
-        elif isinstance(value, list):
-            for i, listvalue in enumerate(value):
-                if isinstance(listvalue, str):
-                    fixed_value = listvalue.replace("\\\"", "\"")
-                    if fixed_value != listvalue:
-                        print("Replaced '%s' by '%s'" % (listvalue, fixed_value))
-                        value[i] = fixed_value
-
-
 def get_type(string_value: str) -> type:
     """Attempt to handle types int, float, boolean and string, nothing more complex since output is CSV."""
+    if string_value is None or len(string_value) == 0:
+        return Any
     if str.isdigit(string_value):
         try:
             int(string_value)
@@ -286,7 +265,7 @@ def write_annotated_header(array_elements: dict, element_types: dict, output_fil
             header.append("%s:ID" % element)
         else:
             columns.insert(0, "id")
-            column_types["id"] = set([int])
+            column_types["id"] = {int}
         for column in columns:
             types = column_types[column]
             high_level_type = get_high_level_type(types)
@@ -300,28 +279,26 @@ def write_annotated_header(array_elements: dict, element_types: dict, output_fil
 
 
 def type_to_string(type_input: type, neo4j_style: bool = False) -> str:
-    typematch = type_to_string.re_typename.fullmatch(str(type_input))
-    if typematch is not None:
-        typename = typematch.group(1)
-        if typename == 'str':
-            return "string"
-        elif typename == 'int':
-            if neo4j_style:
-                return "int"
-            else:
-                return "integer"
-        elif typename == 'bool':
-            return "boolean"
+    if type_input == str:
+        return 'string'
+    if type_input == int:
+        if neo4j_style:
+            return 'int'
         else:
-            return typename
-    else:
-        raise Exception("Unknown Type", type_input)
-type_to_string.re_typename = re.compile('^<class \'([a-z]+)\'>$')
+            return 'integer'
+    if type_input == float:
+        return 'float'
+    if type_input == bool:
+        return 'boolean'
+    raise Exception('Cannot convert unknown type to string.', type_input)
 
 
 def get_high_level_type(types: set):
     if len(types) == 0:
         raise Exception("Empty type set encountered", types)
+    types.discard(Any)
+    if len(types) == 0:
+        return str
     elif len(types) == 1:
         (high_level_type,) = types
         return high_level_type
@@ -334,10 +311,10 @@ def get_high_level_type(types: set):
             return str
 
 
-def generate_neo4j_import_command(target_dir, elements: set, output_filename: str):
+def generate_neo4j_import_command(elements: set, output_filename: str):
     (path, ext) = os.path.splitext(output_filename)
-    command = "neo4j-import --into %s --delimiter \";\" --array-delimiter \"|\" --ignore-empty-strings true " \
-              "--id-type INTEGER" % target_dir
+    command = "neo4j-admin import --mode=csv --database=dblp.db --delimiter \";\" --array-delimiter \"|\" " \
+              "--id-type INTEGER"
     for element in elements:
         command += " --nodes:%s \"%s_%s_header%s,%s_%s%s\"" % (element, path, element, ext, path, element, ext)
     return command
@@ -397,7 +374,7 @@ def main():
             write_annotated_header(array_elements, element_types, args.outputfile, args.neo4j)
             if args.neo4j:
                 print("Generating neo4j-import command...")
-                command = generate_neo4j_import_command(args.neo4j_dir, set(element_types.keys()), args.outputfile)
+                command = generate_neo4j_import_command(set(element_types.keys()), args.outputfile)
                 print("Writing neo4j-import command to shell script file...")
                 with open("neo4j_import.sh", "w") as command_file:
                     command_file.write("#!/bin/bash\n")
