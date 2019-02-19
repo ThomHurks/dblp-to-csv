@@ -283,7 +283,7 @@ def write_annotated_header(array_elements: dict, element_types: dict, output_fil
         array_columns = array_elements.get(element, set())
         columns = sorted(list(column_types.keys()))
         if neo4j_style:
-            header.append(":ID" % element)
+            header.append("%s:ID" % element)
         else:
             columns.insert(0, "id")
             column_types["id"] = set([int])
