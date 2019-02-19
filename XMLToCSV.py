@@ -280,7 +280,7 @@ def write_annotated_header(array_elements: dict, element_types: dict, output_fil
     for element, column_types in element_types.items():
         output_path = "%s_%s_header%s" % (path, element, ext)
         header = []
-        array_columns = array_elements[element]
+        array_columns = array_elements.get(element, set())
         columns = sorted(list(column_types.keys()))
         if neo4j_style:
             header.append(":ID" % element)
