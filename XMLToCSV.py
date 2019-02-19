@@ -174,7 +174,11 @@ def parse_xml(xml_file, elements: set, output_files: Dict[str, csv.DictWriter], 
                     fix_characters(data)
                     output_files[current_tag].writerow(data)
                     if annotate and len(multiple_valued_cells) > 0:
-                        array_elements[current_tag] = array_elements.get(current_tag, set()).union(multiple_valued_cells)
+                        element_cells = array_elements.get(current_tag)
+                        if element_cells is None:
+                            array_elements[current_tag] = multiple_valued_cells.copy()
+                        else:
+                            element_cells.update(multiple_valued_cells)
                     unique_id += 1
                 current_tag = None
             elif elem.tag is not None and elem.text is not None:
