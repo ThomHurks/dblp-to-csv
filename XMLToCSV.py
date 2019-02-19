@@ -216,7 +216,7 @@ def set_relation_values(relations: dict, data: dict, relation_attributes: set, t
 
 
 def set_cell_value(data: dict, column_name: str, value: str, multiple_valued_cells: set):
-    entry = data.get(column_name, None)
+    entry = data.get(column_name)
     if entry is None:
         data[column_name] = value
     else:
@@ -286,7 +286,7 @@ def write_annotated_header(array_elements: dict, element_types: dict, output_fil
             header.append(":ID" % element)
         else:
             columns.insert(0, "id")
-            column_types["id"] = set(int)
+            column_types["id"] = set([int])
         for column in columns:
             types = column_types[column]
             high_level_type = get_high_level_type(types)
