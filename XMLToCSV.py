@@ -6,7 +6,7 @@ import os
 import csv
 import time
 import re
-from typing import Dict, Optional, Tuple, Union
+from typing import Dict, Tuple, Union
 
 __author__ = 'Thom Hurks'
 
@@ -65,6 +65,8 @@ def parse_args():
     if parsed_args.relations:
         parsed_args.relations = set(parsed_args.relations)
         print("Will create relations for attribute(s:) %s" % (", ".join(sorted(list(parsed_args.relations)))))
+    else:
+        parsed_args.relations = set()
     return parsed_args
 
 
@@ -113,10 +115,8 @@ def get_element_attributes(xml_file, elements: set) -> dict:
             keys = elem.keys()
             if len(keys) > 0:
                 keys = set(keys)
-                if "id" in keys:
-                    raise InvalidElementName("id", elem.tag, "root")
                 attributes = data[current_tag]
-                data[current_tag] = attributes.union(keys)
+                attributes.update(keys)
         elif current_tag is not None and event == "end":
             if elem.tag == current_tag:
                 current_tag = None
@@ -131,8 +131,11 @@ def get_element_attributes(xml_file, elements: set) -> dict:
                         attributes.add("%s-%s" % (elem.tag, key))
             root.clear()
     for element in elements:
-        if len(data[element]) == 0:
+        attributes = data[element]
+        if len(attributes) == 0:
             data.pop(element)
+        elif "id" in attributes:
+            raise InvalidElementName("id", element, "root")
     return data
 
 
@@ -191,6 +194,8 @@ def parse_xml(xml_file, elements: set, output_files: Dict[str, csv.DictWriter], 
 
 
 def set_relation_values(relations: dict, data: dict, relation_attributes: set, to_id: int):
+    if len(relation_attributes) == 0:
+        return
     for column_name, attributes in data.items():
         if column_name in relation_attributes:
             relation = relations.get(column_name, dict())
