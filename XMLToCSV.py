@@ -228,8 +228,12 @@ def set_cell_value(data: dict, column_name: str, value: str, multiple_valued_cel
 
 
 def set_type_information(element_types: dict, current_tag: str, column_name: str, value: str):
-    attribute_types = element_types.get(current_tag, dict())
-    types = attribute_types.get(column_name, set())
+    attribute_types = element_types.get(current_tag)
+    if attribute_types is None:
+        element_types[current_tag] = attribute_types = dict()
+    types = attribute_types.get(column_name)
+    if types is None:
+        attribute_types[column_name] = types = set()
     types.add(get_type(value))
 
 
