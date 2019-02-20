@@ -311,12 +311,15 @@ def get_high_level_type(types: set):
             return str
 
 
-def generate_neo4j_import_command(elements: set, output_filename: str):
+def generate_neo4j_import_command(elements: set, relations: set, output_filename: str):
     (path, ext) = os.path.splitext(output_filename)
     command = "neo4j-admin import --mode=csv --database=dblp.db --delimiter \";\" --array-delimiter \"|\" " \
               "--id-type INTEGER"
     for element in elements:
         command += " --nodes:%s \"%s_%s_header%s,%s_%s%s\"" % (element, path, element, ext, path, element, ext)
+    for relation in relations:
+        command += " --nodes:%s \"%s_%s%s\"" % (relation, path, relation, ext)
+        command += " --relationships:%s_relation \"%s_%s_relation%s\"" % (relation, path, relation, ext)
     return command
 
 
@@ -373,7 +376,8 @@ def main():
             write_annotated_header(array_elements, element_types, args.outputfile, args.neo4j)
             if args.neo4j:
                 print("Generating neo4j-import command...")
-                command = generate_neo4j_import_command(set(element_types.keys()), args.outputfile)
+                command = generate_neo4j_import_command(set(element_types.keys()), set(relations.keys()),
+                                                        args.outputfile)
                 print("Writing neo4j-import command to shell script file...")
                 with open("neo4j_import.sh", "w") as command_file:
                     command_file.write("#!/bin/bash\n")
