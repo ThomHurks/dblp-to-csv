@@ -31,9 +31,14 @@ optional arguments:
                         shell script is generated for easy importing. Implies
                         --annotate.
   --relations RELATIONS [RELATIONS ...]
-                        The element attributes that need to be turned into a
-                        relation instance to their element, e.g. for author to
-                        article, editor to book, etc pass in: author editor
+                        The element attributes that will be treated as
+                        elements, and for which a relation to the parent
+                        element will be created. For example, in order to turn
+                        the author attribute of the article element into an
+                        element with a relation, use "author:authors". The
+                        part after the colon is used as the name of the
+                        relation.
+
 ```
 
 ## Example
