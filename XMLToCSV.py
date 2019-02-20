@@ -6,7 +6,8 @@ import os
 import csv
 import time
 import re
-from typing import Dict, Tuple, Union, Any
+from typing import Dict, Tuple, Union
+from datetime import date, datetime
 
 __author__ = 'Thom Hurks'
 
@@ -18,7 +19,7 @@ class InvalidElementName(Exception):
         self.parent_name = parent_name
 
     def __str__(self):
-        return "Invalid name %s found in tag %s within element %s" % (repr(self.invalid_element_name),
+        return 'Invalid name %s found in tag %s within element %s' % (repr(self.invalid_element_name),
                                                                       repr(self.tag_name),
                                                                       repr(self.parent_name))
 
@@ -27,7 +28,7 @@ def existing_file(filename: str) -> str:
     if os.path.isfile(filename):
         return filename
     else:
-        raise argparse.ArgumentTypeError("%s is not a valid input file!" % filename)
+        raise argparse.ArgumentTypeError('%s is not a valid input file!' % filename)
 
 
 def valid_relation(relation: str) -> tuple:
@@ -35,7 +36,7 @@ def valid_relation(relation: str) -> tuple:
     if len(parts) == 2:
         return tuple(parts)
     else:
-        raise argparse.ArgumentTypeError("%s must have the form attribute:relation" % relation)
+        raise argparse.ArgumentTypeError('%s must have the form attribute:relation' % relation)
 
 
 def parse_args():
@@ -51,26 +52,26 @@ def parse_args():
                         help='Headers become more Neo4J-specific and a neo4j-import shell script is generated for easy '
                              'importing. Implies --annotate.')
     parser.add_argument('--relations', action='store', required=False, type=valid_relation, nargs='+',
-                        help='The element attributes that will be treated as elements, and for which a relation to ' \
-                             'the parent element will be created. For example, in order to turn the author attribute ' \
-                             'of the article element into an element with a relation, use "author:authors". The part ' \
-                             'after the colon is used as the name of the relation.')
+                        help='The element attributes that will be treated as elements, and to which a relation from '
+                             'the parent element will be created. For example, in order to turn the author attribute '
+                             'of the article element into an element with a relation, use "author:authored_by". The '
+                             'part after the colon is used as the name of the relation.')
     parsed_args = parser.parse_args()
     if parsed_args.neo4j:
         if not parsed_args.annotate:
             parsed_args.annotate = True
-            print("--neo4j implies --annotate!")
+            print('--neo4j implies --annotate!')
     if parsed_args.relations:
-        attributes = [rel[0] for rel in parsed_args.relations]
-        attribute_set = set(attributes)
-        if len(attribute_set) == len(attributes):
-            parsed_args.relations = attribute_set
-            print("Will create relations for attribute(s): %s" % (", ".join(sorted(attributes))))
+        attr_rel = {attribute: relation for (attribute, relation) in parsed_args.relations}
+        attributes = attr_rel.keys()
+        if len(attributes) == len(set(attr_rel.values())) == len(parsed_args.relations):
+            parsed_args.relations = attr_rel
+            print('Will create relations for attribute(s): %s' % (', '.join(sorted(attributes))))
         else:
-            print('error: argument --relations: The element attributes must be unique: %s' % ', '.join(attributes))
+            print('error: argument --relations: The element attributes and relation names must be unique.')
             exit(1)
     else:
-        parsed_args.relations = set()
+        parsed_args.relations = dict()
     return parsed_args
 
 
@@ -91,9 +92,9 @@ def open_outputfiles(elements: set, element_attributes: dict, output_filename: s
         fieldnames = element_attributes.get(element, None)
         if fieldnames is not None and len(fieldnames) > 0:
             fieldnames = sorted(list(fieldnames))
-            fieldnames.insert(0, "id")
-            output_path = "%s_%s%s" % (path, element, ext)
-            output_file = open(output_path, "w")
+            fieldnames.insert(0, 'id')
+            output_path = '%s_%s%s' % (path, element, ext)
+            output_file = open(output_path, 'w')
             output_writer = csv.DictWriter(output_file, fieldnames=fieldnames, delimiter=';',
                                            quoting=csv.QUOTE_MINIMAL, quotechar='"', doublequote=True,
                                            restval='', extrasaction='raise')
@@ -104,7 +105,7 @@ def open_outputfiles(elements: set, element_attributes: dict, output_filename: s
 
 
 def get_element_attributes(xml_file, elements: set) -> dict:
-    context = etree.iterparse(xml_file, dtd_validation=True, events=("start", "end"), attribute_defaults=True,
+    context = etree.iterparse(xml_file, dtd_validation=True, events=('start', 'end'), attribute_defaults=True,
                               load_dtd=True)
     # turn it into an iterator
     context = iter(context)
@@ -115,39 +116,39 @@ def get_element_attributes(xml_file, elements: set) -> dict:
         data[element] = set()
     current_tag = None
     for event, elem in context:
-        if current_tag is None and event == "start" and elem.tag in elements:
+        if current_tag is None and event == 'start' and elem.tag in elements:
             current_tag = elem.tag
             keys = elem.keys()
             if len(keys) > 0:
                 keys = set(keys)
                 attributes = data[current_tag]
                 attributes.update(keys)
-        elif current_tag is not None and event == "end":
+        elif current_tag is not None and event == 'end':
             if elem.tag == current_tag:
                 current_tag = None
             elif elem.tag is not None and elem.text is not None:
-                if elem.tag == "id":
-                    raise InvalidElementName("id", elem.tag, current_tag)
+                if elem.tag == 'id':
+                    raise InvalidElementName('id', elem.tag, current_tag)
                 attributes = data[current_tag]
                 attributes.add(elem.tag)
                 keys = elem.keys()
                 if len(keys) > 0:
                     for key in keys:
-                        attributes.add("%s-%s" % (elem.tag, key))
+                        attributes.add('%s-%s' % (elem.tag, key))
             root.clear()
     for element in elements:
         attributes = data[element]
         if len(attributes) == 0:
             data.pop(element)
-        elif "id" in attributes:
-            raise InvalidElementName("id", element, "root")
+        elif 'id' in attributes:
+            raise InvalidElementName('id', element, 'root')
     return data
 
 
 def parse_xml(xml_file, elements: set, output_files: Dict[str, csv.DictWriter], relation_attributes: set,
               annotate: bool = False) \
         -> Union[Tuple[dict, int, dict, dict], Tuple[dict, int]]:
-    context = etree.iterparse(xml_file, dtd_validation=True, events=("start", "end"))
+    context = etree.iterparse(xml_file, dtd_validation=True, events=('start', 'end'))
     # turn it into an iterator
     context = iter(context)
     # get the root element
@@ -161,7 +162,7 @@ def parse_xml(xml_file, elements: set, output_files: Dict[str, csv.DictWriter], 
         array_elements = dict()
         element_types = dict()
     for event, elem in context:
-        if current_tag is None and event == "start" and elem.tag in elements:
+        if current_tag is None and event == 'start' and elem.tag in elements:
             current_tag = elem.tag
             data.clear()
             multiple_valued_cells.clear()
@@ -169,13 +170,13 @@ def parse_xml(xml_file, elements: set, output_files: Dict[str, csv.DictWriter], 
             if annotate:
                 for (key, value) in elem.attrib.items():
                     set_type_information(element_types, current_tag, key, value)
-        elif current_tag is not None and event == "end":
+        elif current_tag is not None and event == 'end':
             if elem.tag == current_tag:
                 if len(data) > 0:
                     set_relation_values(relations, data, relation_attributes, unique_id)
                     for cell in multiple_valued_cells:
                         data[cell] = '|'.join(sorted(data[cell]))
-                    data["id"] = unique_id
+                    data['id'] = unique_id
                     output_files[current_tag].writerow(data)
                     if annotate and len(multiple_valued_cells) > 0:
                         element_cells = array_elements.get(current_tag)
@@ -190,7 +191,7 @@ def parse_xml(xml_file, elements: set, output_files: Dict[str, csv.DictWriter], 
                 if annotate:
                     set_type_information(element_types, current_tag, elem.tag, elem.text)
                 for (key, value) in elem.attrib.items():
-                    column_name = "%s-%s" % (elem.tag, key)
+                    column_name = '%s-%s' % (elem.tag, key)
                     set_cell_value(data, column_name, value, multiple_valued_cells)
                     if annotate:
                         set_type_information(element_types, current_tag, column_name, value)
@@ -241,112 +242,120 @@ def set_type_information(element_types: dict, current_tag: str, column_name: str
     types.add(get_type(value))
 
 
-def get_type(string_value: str) -> type:
+def get_type(string_value: str) -> str:
     """Attempt to handle types int, float, boolean and string, nothing more complex since output is CSV."""
     if string_value is None or len(string_value) == 0:
-        return Any
+        return 'any'
     if str.isdigit(string_value):
         try:
             int(string_value)
-            return int
+            return 'integer'
         except ValueError:
-            return str
+            return 'string'
     if get_type.re_number.fullmatch(string_value) is not None:
         try:
             float(string_value)
-            return float
+            return 'float'
         except ValueError:
-            return str
-    if string_value.lower() == "true" or string_value.lower() == "false":
-        return bool
-    return str
-get_type.re_number = re.compile("^\d+\.\d+$")
+            return 'string'
+    if get_type.re_date.fullmatch(string_value) is not None:
+        try:
+            date.fromisoformat(string_value)
+            return 'date'
+        except ValueError:
+            return 'string'
+    if get_type.re_datetime.fullmatch(string_value) is not None:
+        try:
+            datetime.fromisoformat(string_value)
+            return 'datetime'
+        except ValueError:
+            return 'string'
+    if string_value.lower() == 'true' or string_value.lower() == 'false':
+        return 'boolean'
+    return 'string'
+get_type.re_number = re.compile(r'^\d+\.\d+$')
+get_type.re_date = re.compile(r'^\d{4}-\d{2}-\d{2}$')
+get_type.re_datetime = re.compile(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}(?::\d{2})?$')
 
 
 def write_annotated_header(array_elements: dict, element_types: dict, output_filename: str, neo4j_style: bool = False):
     (path, ext) = os.path.splitext(output_filename)
     for element, column_types in element_types.items():
-        output_path = "%s_%s_header%s" % (path, element, ext)
+        output_path = '%s_%s_header%s' % (path, element, ext)
         header = []
         array_columns = array_elements.get(element, set())
         columns = sorted(list(column_types.keys()))
         if neo4j_style:
-            header.append("%s:ID" % element)
+            header.append('%s:ID' % element)
         else:
-            columns.insert(0, "id")
-            column_types["id"] = {int}
+            columns.insert(0, 'id')
+            column_types['id'] = {int}
         for column in columns:
             types = column_types[column]
             high_level_type = get_high_level_type(types)
-            typename = type_to_string(high_level_type, neo4j_style)
+            typename = translate_type(high_level_type, neo4j_style)
             if column in array_columns:
-                header.append("%s:%s[]" % (column, typename))
+                header.append('%s:%s[]' % (column, typename))
             else:
-                header.append("%s:%s" % (column, typename))
-        with open(output_path, "w") as output_file:
+                header.append('%s:%s' % (column, typename))
+        with open(output_path, 'w') as output_file:
             output_file.write(';'.join(header))
 
 
-def type_to_string(type_input: type, neo4j_style: bool = False) -> str:
-    if type_input == str:
+def translate_type(type_input: str, neo4j_style: bool = False) -> str:
+    if neo4j_style and type_input == 'integer':
+        return 'int'
+    return type_input
+
+
+def get_high_level_type(types: set) -> str:
+    if len(types) == 0:
+        raise Exception('Empty type set encountered', types)
+    types.discard('any')
+    if len(types) == 0:
         return 'string'
-    if type_input == int:
-        if neo4j_style:
-            return 'int'
-        else:
-            return 'integer'
-    if type_input == float:
-        return 'float'
-    if type_input == bool:
-        return 'boolean'
-    raise Exception('Cannot convert unknown type to string.', type_input)
-
-
-def get_high_level_type(types: set):
-    if len(types) == 0:
-        raise Exception("Empty type set encountered", types)
-    types.discard(Any)
-    if len(types) == 0:
-        return str
     elif len(types) == 1:
         (high_level_type,) = types
         return high_level_type
     else:
-        if str in types:
-            return str
-        elif len(types) == 2 and float in types and int in types:
-            return float
-        else:
-            return str
+        if 'string' in types:
+            return 'string'
+        elif len(types) == 2:
+            if 'float' in types and 'integer' in types:
+                return 'float'
+            elif 'date' in types and 'datetime' in types:
+                return 'datetime'
+    return 'string'
 
 
-def generate_neo4j_import_command(elements: set, relations: set, output_filename: str):
+def generate_neo4j_import_command(elements: set, relations: set, relation_alias: dict, output_filename: str):
     (path, ext) = os.path.splitext(output_filename)
-    command = "neo4j-admin import --mode=csv --database=dblp.db --delimiter \";\" --array-delimiter \"|\" " \
-              "--id-type INTEGER"
+    command = 'neo4j-admin import --mode=csv --database=dblp.db --delimiter ";" --array-delimiter "|" ' \
+              '--id-type INTEGER'
     for element in elements:
-        command += " --nodes:%s \"%s_%s_header%s,%s_%s%s\"" % (element, path, element, ext, path, element, ext)
+        command += ' --nodes:%s "%s_%s_header%s,%s_%s%s"' % (element, path, element, ext, path, element, ext)
     for relation in relations:
-        command += " --nodes:%s \"%s_%s%s\"" % (relation, path, relation, ext)
-        command += " --relationships:%s_relation \"%s_%s_relation%s\"" % (relation, path, relation, ext)
+        command += ' --nodes:%s "%s_%s%s"' % (relation, path, relation, ext)
+        predicate = relation_alias[relation]
+        command += ' --relationships:%s "%s_%s_%s%s"' % (predicate, path, relation, predicate, ext)
     return command
 
 
-def write_relation_files(output_filename: str, relations: dict, unique_id: int):
+def write_relation_files(output_filename: str, relations: dict, relation_alias: dict, unique_id: int):
     (path, ext) = os.path.splitext(output_filename)
     for column_name, relation in relations.items():
-        output_path_node = "%s_%s%s" % (path, column_name, ext)
-        output_path_relation = "%s_%s_relation%s" % (path, column_name, ext)
-        with open(output_path_relation, "w") as output_file_relation:
-            output_file_relation.write(":START_ID;:END_ID\n")
-            with open(output_path_node, "w") as output_file_node:
+        output_path_node = '%s_%s%s' % (path, column_name, ext)
+        output_path_relation = '%s_%s_%s%s' % (path, column_name, relation_alias[column_name], ext)
+        with open(output_path_relation, 'w') as output_file_relation:
+            output_file_relation.write(':START_ID;:END_ID\n')
+            with open(output_path_node, 'w') as output_file_node:
                 node_output_writer = csv.writer(output_file_node, delimiter=';', quoting=csv.QUOTE_MINIMAL,
                                                 quotechar='"', doublequote=True)
-                output_file_node.write(":ID;%s:string\n" % column_name)
+                output_file_node.write(':ID;%s:string\n' % column_name)
                 for value, rel_instance in relation.items():
                     node_output_writer.writerow([unique_id, value])
-                    for to_id in rel_instance:
-                        output_file_relation.write("%d;%d\n" % (unique_id, to_id))
+                    for from_id in rel_instance:
+                        output_file_relation.write('%d;%d\n' % (from_id, unique_id))
                     unique_id += 1
 
 
@@ -354,49 +363,50 @@ def main():
     args = parse_args()
     if args.xml_filename is not None and args.dtd_filename is not None and args.outputfile is not None:
         start_time = time.time()
-        print("Start!")
-        with open(args.dtd_filename, "rb") as dtd_file:
-            print("Reading elements from DTD file...")
+        print('Start!')
+        with open(args.dtd_filename, 'rb') as dtd_file:
+            print('Reading elements from DTD file...')
             elements = get_elements(dtd_file)
-        with open(args.xml_filename, "rb") as xml_file:
-            print("Finding unique attributes for all elements...")
+        with open(args.xml_filename, 'rb') as xml_file:
+            print('Finding unique attributes for all elements...')
             try:
                 element_attributes = get_element_attributes(xml_file, elements)
             except InvalidElementName as e:
                 element_attributes = None
                 print(e)
                 exit(1)
-        print("Opening output files...")
+        print('Opening output files...')
         output_files = open_outputfiles(elements, element_attributes, args.outputfile, args.annotate)
         array_elements = None
         element_types = None
-        with open(args.xml_filename, "rb") as xml_file:
-            print("Parsing XML and writing to CSV files...")
+        with open(args.xml_filename, 'rb') as xml_file:
+            print('Parsing XML and writing to CSV files...')
+            relation_attributes = set(args.relations.keys())
             if args.annotate:
                 (relations, unique_id, array_elements, element_types) = parse_xml(xml_file, elements, output_files,
-                                                                                  args.relations, annotate=True)
+                                                                                  relation_attributes, annotate=True)
             else:
-                relations, unique_id = parse_xml(xml_file, elements, output_files, args.relations)
+                relations, unique_id = parse_xml(xml_file, elements, output_files, relation_attributes)
         if args.relations and relations and unique_id >= 0:
-            print("Writing relation files...")
-            write_relation_files(args.outputfile, relations, unique_id)
+            print('Writing relation files...')
+            write_relation_files(args.outputfile, relations, args.relations, unique_id)
         if args.annotate and array_elements and element_types:
-            print("Writing annotated headers...")
+            print('Writing annotated headers...')
             write_annotated_header(array_elements, element_types, args.outputfile, args.neo4j)
             if args.neo4j:
-                print("Generating neo4j-import command...")
+                print('Generating neo4j-import command...')
                 command = generate_neo4j_import_command(set(element_types.keys()), set(relations.keys()),
-                                                        args.outputfile)
-                print("Writing neo4j-import command to shell script file...")
-                with open("neo4j_import.sh", "w") as command_file:
-                    command_file.write("#!/bin/bash\n")
+                                                        args.relations, args.outputfile)
+                print('Writing neo4j-import command to shell script file...')
+                with open('neo4j_import.sh', 'w') as command_file:
+                    command_file.write('#!/bin/bash\n')
                     command_file.write(command)
         end_time = time.time()
-        print("Done after %f seconds" % (end_time - start_time))
+        print('Done after %f seconds' % (end_time - start_time))
     else:
-        print("Invalid input arguments.")
+        print('Invalid input arguments.')
         exit(1)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
