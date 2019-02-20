@@ -30,11 +30,12 @@ def existing_file(filename: str) -> str:
         raise argparse.ArgumentTypeError("%s is not a valid input file!" % filename)
 
 
-def existing_dir(dirname: str) -> str:
-    if os.path.isdir(dirname):
-        return dirname
+def valid_relation(relation: str) -> tuple:
+    parts = [part for part in relation.split(':') if len(part) > 0]
+    if len(parts) == 2:
+        return tuple(parts)
     else:
-        raise argparse.ArgumentTypeError("%s is not a valid directory!" % dirname)
+        raise argparse.ArgumentTypeError("%s must have the form attribute:relation" % relation)
 
 
 def parse_args():
@@ -49,17 +50,25 @@ def parse_args():
     parser.add_argument('--neo4j', action='store_true', required=False,
                         help='Headers become more Neo4J-specific and a neo4j-import shell script is generated for easy '
                              'importing. Implies --annotate.')
-    parser.add_argument('--relations', action='store', required=False, type=str, nargs='+',
-                        help='The element attributes that need to be turned into a relation instance to their element, '
-                             'e.g. for author to article, editor to book, etc pass in: author editor')
+    parser.add_argument('--relations', action='store', required=False, type=valid_relation, nargs='+',
+                        help='The element attributes that will be treated as elements, and for which a relation to ' \
+                             'the parent element will be created. For example, in order to turn the author attribute ' \
+                             'of the article element into an element with a relation, use "author:authors". The part ' \
+                             'after the colon is used as the name of the relation.')
     parsed_args = parser.parse_args()
     if parsed_args.neo4j:
         if not parsed_args.annotate:
             parsed_args.annotate = True
             print("--neo4j implies --annotate!")
     if parsed_args.relations:
-        parsed_args.relations = set(parsed_args.relations)
-        print("Will create relations for attribute(s:) %s" % (", ".join(sorted(list(parsed_args.relations)))))
+        attributes = [rel[0] for rel in parsed_args.relations]
+        attribute_set = set(attributes)
+        if len(attribute_set) == len(attributes):
+            parsed_args.relations = attribute_set
+            print("Will create relations for attribute(s): %s" % (", ".join(sorted(attributes))))
+        else:
+            print('error: argument --relations: The element attributes must be unique: %s' % ', '.join(attributes))
+            exit(1)
     else:
         parsed_args.relations = set()
     return parsed_args
