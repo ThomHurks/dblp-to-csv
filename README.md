@@ -55,3 +55,4 @@ This command will parse the DBLP XML file dblp.xml using the DTD file dblp.dtd. 
 
 ## Links
 To learn more about DBLP: https://dblp.dagstuhl.de
+Download the DBLP XML files at: https://dblp.dagstuhl.de/xml/
