@@ -51,6 +51,7 @@ This command will parse the DBLP XML file dblp.xml using the DTD file dblp.dtd. 
 ## Requirements
 - Python 3.7+ (use ```python3 --version``` to confirm)
 - lxml (```pip3 install lxml```)
+- Or: ```pip3 install -r requirements.txt```
 
 ## Links
 To learn more about DBLP: https://dblp.dagstuhl.de
