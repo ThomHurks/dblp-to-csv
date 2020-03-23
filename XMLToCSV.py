@@ -1,13 +1,14 @@
 #! /usr/bin/env python3
 
-from lxml import etree
 import argparse
-import os
 import csv
-import time
+import os
 import re
-from typing import Dict, Tuple, Union
+import time
 from datetime import date, datetime
+from typing import Dict, Tuple, Union
+
+from lxml import etree
 
 __author__ = 'Thom Hurks'
 
@@ -94,7 +95,7 @@ def open_outputfiles(elements: set, element_attributes: dict, output_filename: s
             fieldnames = sorted(list(fieldnames))
             fieldnames.insert(0, 'id')
             output_path = '%s_%s%s' % (path, element, ext)
-            output_file = open(output_path, 'w')
+            output_file = open(output_path, mode='w', encoding='UTF-8')
             output_writer = csv.DictWriter(output_file, fieldnames=fieldnames, delimiter=';',
                                            quoting=csv.QUOTE_MINIMAL, quotechar='"', doublequote=True,
                                            restval='', extrasaction='raise')
@@ -273,6 +274,8 @@ def get_type(string_value: str) -> str:
     if string_value.lower() == 'true' or string_value.lower() == 'false':
         return 'boolean'
     return 'string'
+
+
 get_type.re_number = re.compile(r'^\d+\.\d+$')
 get_type.re_date = re.compile(r'^\d{4}-\d{2}-\d{2}$')
 get_type.re_datetime = re.compile(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}(?::\d{2})?$')
@@ -298,7 +301,7 @@ def write_annotated_header(array_elements: dict, element_types: dict, output_fil
                 header.append('%s:%s[]' % (column, typename))
             else:
                 header.append('%s:%s' % (column, typename))
-        with open(output_path, 'w') as output_file:
+        with open(output_path, mode='w', encoding='UTF-8') as output_file:
             output_file.write(';'.join(header))
 
 
@@ -346,9 +349,9 @@ def write_relation_files(output_filename: str, relations: dict, relation_alias: 
     for column_name, relation in relations.items():
         output_path_node = '%s_%s%s' % (path, column_name, ext)
         output_path_relation = '%s_%s_%s%s' % (path, column_name, relation_alias[column_name], ext)
-        with open(output_path_relation, 'w') as output_file_relation:
+        with open(output_path_relation, mode='w', encoding='UTF-8') as output_file_relation:
             output_file_relation.write(':START_ID;:END_ID\n')
-            with open(output_path_node, 'w') as output_file_node:
+            with open(output_path_node, mode='w', encoding='UTF-8') as output_file_node:
                 node_output_writer = csv.writer(output_file_node, delimiter=';', quoting=csv.QUOTE_MINIMAL,
                                                 quotechar='"', doublequote=True)
                 output_file_node.write(':ID;%s:string\n' % column_name)
@@ -364,10 +367,10 @@ def main():
     if args.xml_filename is not None and args.dtd_filename is not None and args.outputfile is not None:
         start_time = time.time()
         print('Start!')
-        with open(args.dtd_filename, 'rb') as dtd_file:
+        with open(args.dtd_filename, mode='rb') as dtd_file:
             print('Reading elements from DTD file...')
             elements = get_elements(dtd_file)
-        with open(args.xml_filename, 'rb') as xml_file:
+        with open(args.xml_filename, mode='rb') as xml_file:
             print('Finding unique attributes for all elements...')
             try:
                 element_attributes = get_element_attributes(xml_file, elements)
@@ -379,7 +382,7 @@ def main():
         output_files = open_outputfiles(elements, element_attributes, args.outputfile, args.annotate)
         array_elements = None
         element_types = None
-        with open(args.xml_filename, 'rb') as xml_file:
+        with open(args.xml_filename, mode='rb') as xml_file:
             print('Parsing XML and writing to CSV files...')
             relation_attributes = set(args.relations.keys())
             if args.annotate:
@@ -398,7 +401,7 @@ def main():
                 command = generate_neo4j_import_command(set(element_types.keys()), set(relations.keys()),
                                                         args.relations, args.outputfile)
                 print('Writing neo4j-import command to shell script file...')
-                with open('neo4j_import.sh', 'w') as command_file:
+                with open('neo4j_import.sh', mode='w', encoding='UTF-8') as command_file:
                     command_file.write('#!/bin/bash\n')
                     command_file.write(command)
         end_time = time.time()
