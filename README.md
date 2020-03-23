@@ -44,7 +44,7 @@ optional arguments:
 ## Example
 ```
 chmod +x XMLToCSV.py
-./XMLToCSV.py --annotate --neo4j dblp.xml dblp.dtd output.csv --relations author:authored_by journal:published_in publisher:published_by school:submitted_at editor:edited_by cite:has_citation
+./XMLToCSV.py --annotate --neo4j dblp.xml dblp.dtd output.csv --relations author:authored_by journal:published_in publisher:published_by school:submitted_at editor:edited_by cite:has_citation series:is_part_of
 ```
 This command will parse the DBLP XML file dblp.xml using the DTD file dblp.dtd. Because the ```--annotate``` option is used, type annotations will be generated as well. The ```--relations``` option is given, so the element attributes author, journal, publisher, school and editor will be treated as nodes and relations will be created between these nodes and the elements that contained them. The string ```output.csv``` is used as a pattern, so generated files will be named ```output_article.csv``` etc. The type annotations will be stored in similarly named files, for example ```output_article_header.csv```. Since we also passed the ```--neo4j``` option, the type annotations will be Neo4j compatible, and the tool generates a shell script called ```neo4j_import.sh``` that can be run to import the generated CSV files into a Neo4j graph database using the ```neo4j-admin import``` bulk importer tool.
 

@@ -4,3 +4,4 @@
 dblp.dtd
 dblp.xml
 *.sh
+venv/
