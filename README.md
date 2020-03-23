@@ -54,5 +54,5 @@ This command will parse the DBLP XML file dblp.xml using the DTD file dblp.dtd. 
 - Or: ```pip3 install -r requirements.txt```
 
 ## Links
-To learn more about DBLP: https://dblp.dagstuhl.de
+To learn more about DBLP: https://dblp.dagstuhl.de\
 Download the DBLP XML files at: https://dblp.dagstuhl.de/xml/
